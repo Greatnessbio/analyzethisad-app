@@ -4,7 +4,6 @@ import requests
 import json
 import time
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
-from collections import Counter
 
 # Authentication function
 def authenticate(username, password):
@@ -23,24 +22,6 @@ def check_rate_limits():
     else:
         st.error("Failed to check rate limits. Please try again later.")
         return None, None
-
-# Updated function to extract search term from CSV
-def extract_search_term(df):
-    # Combine title and snippet columns
-    combined_text = df['title'].fillna('') + ' ' + df['snippet'].fillna('')
-    
-    # Convert to lowercase and split into words
-    all_words = ' '.join(combined_text).lower().split()
-    
-    # Count occurrences of words (excluding common words)
-    common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with'}
-    word_counts = Counter(word for word in all_words if word not in common_words)
-    
-    # Return the most frequent word as the likely search term
-    if word_counts:
-        return max(word_counts, key=word_counts.get)
-    else:
-        return "product"  # Default if no words found
 
 # OpenRouter API call with retry logic and improved error handling
 @retry(
@@ -137,7 +118,10 @@ def main():
     # Main application (only accessible after login)
     uploaded_file = st.file_uploader("Upload your CSV file", type="csv")
     
-    if uploaded_file is not None:
+    # Add input for search term
+    search_term = st.text_input("Enter the search term you used to generate this data:", "")
+    
+    if uploaded_file is not None and search_term:
         try:
             df = pd.read_csv(uploaded_file)
             st.write("Uploaded CSV file:")
@@ -150,9 +134,7 @@ def main():
                 st.info("Please ensure your CSV file has the following columns: title, snippet, displayed_link")
                 return
 
-            # Extract search term
-            search_term = extract_search_term(df)
-            st.info(f"Detected search term: {search_term}")
+            st.info(f"Analysis will be performed for the search term: {search_term}")
 
             if st.button("Analyze Ads"):
                 # Check rate limits
@@ -209,6 +191,11 @@ Display URL: {row['displayed_link']}"""
 
         except Exception as e:
             st.error(f"An error occurred while processing the file: {str(e)}")
+
+    elif uploaded_file is not None and not search_term:
+        st.warning("Please enter the search term you used to generate this data.")
+    elif search_term and not uploaded_file:
+        st.warning("Please upload a CSV file to analyze.")
 
     # Logout button
     if st.sidebar.button("Logout"):
