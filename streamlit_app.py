@@ -75,12 +75,12 @@ def analyze_ad_copy(ad_copy):
         try:
             return json.loads(content)
         except json.JSONDecodeError:
-            # If parsing fails, return the raw content
-            return {"error": "Failed to parse API response as JSON", "raw_content": content}
+            st.error(f"Failed to parse API response as JSON. Raw content: {content}")
+            return None
     
     except requests.exceptions.RequestException as e:
         st.error(f"API request failed: {str(e)}")
-        return {"error": f"API request failed: {str(e)}"}
+        return None
 
 def validate_columns(df):
     expected_columns = ['title', 'snippet', 'displayed_link']
@@ -137,32 +137,25 @@ def main():
                 with st.spinner("Analyzing ads... This may take a few minutes."):
                     results = []
                     for index, row in df.iterrows():
-                        try:
-                            ad_copy = f"""Title: {row['title']}
+                        ad_copy = f"""Title: {row['title']}
 Snippet: {row['snippet']}
 Display URL: {row['displayed_link']}"""
-                            analysis = analyze_ad_copy(ad_copy)
-                            
-                            # Check if the analysis contains an error
-                            if "error" in analysis:
-                                st.error(f"Error processing row {index}: {analysis['error']}")
-                                if "raw_content" in analysis:
-                                    st.text(f"Raw API response: {analysis['raw_content']}")
-                                continue
-                            
+                        analysis = analyze_ad_copy(ad_copy)
+                        
+                        if analysis is not None:
                             results.append(analysis)
-                            
-                            # Respect rate limits
-                            if (index + 1) % rate_limit == 0:
-                                st.info(f"Pausing for rate limit. Resuming in {interval} seconds...")
-                                time.sleep(int(interval[:-1]))  # Remove 's' from interval string
-                        except Exception as e:
-                            st.error(f"Error processing row {index}: {str(e)}")
-                            continue
+                            st.success(f"Successfully analyzed ad {index + 1}")
+                        else:
+                            st.error(f"Failed to analyze ad {index + 1}")
+                        
+                        # Respect rate limits
+                        if (index + 1) % rate_limit == 0 and index < len(df) - 1:
+                            st.info(f"Pausing for rate limit. Resuming in {interval} seconds...")
+                            time.sleep(int(interval[:-1]))  # Remove 's' from interval string
 
                     if results:
                         st.session_state.results = pd.DataFrame(results)
-                        st.success("Analysis complete!")
+                        st.success(f"Analysis complete! Successfully analyzed {len(results)} out of {len(df)} ads.")
                     else:
                         st.warning("No results were generated. Please check your CSV file and try again.")
 
