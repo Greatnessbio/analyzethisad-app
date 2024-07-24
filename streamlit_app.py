@@ -2,19 +2,36 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
+import time
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 # Authentication function
 def authenticate(username, password):
     return (username == st.secrets["login_username"] and 
             password == st.secrets["login_password"])
 
-# OpenRouter API call
-@st.cache_data(show_spinner=False)
+# Function to check API rate limits
+def check_rate_limits():
+    response = requests.get(
+        "https://openrouter.ai/api/v1/auth/key",
+        headers={"Authorization": f"Bearer {st.secrets['openrouter_api_key']}"},
+    )
+    if response.status_code == 200:
+        data = response.json()['data']
+        return data['rate_limit']['requests'], data['rate_limit']['interval']
+    else:
+        st.error("Failed to check rate limits. Please try again later.")
+        return None, None
+
+# OpenRouter API call with retry logic
+@retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(3))
 def analyze_ad_copy(ad_copy):
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
             "Authorization": f"Bearer {st.secrets['openrouter_api_key']}",
+            "HTTP-Referer": "https://your-app-url.com",  # Replace with your actual app URL
+            "X-Title": "ELISA Kit Analysis App",  # Replace with your app's name
         },
         json={
             "model": "anthropic/claude-3.5-sonnet",
@@ -46,6 +63,7 @@ Format your response as a JSON object with keys for each analysis component."""}
             ]
         }
     )
+    response.raise_for_status()
     return response.json()['choices'][0]['message']['content']
 
 def validate_columns(df):
@@ -95,9 +113,14 @@ def main():
                 return
 
             if st.button("Analyze Ads"):
+                # Check rate limits
+                rate_limit, interval = check_rate_limits()
+                if rate_limit is None:
+                    return
+
                 with st.spinner("Analyzing ads... This may take a few minutes."):
                     results = []
-                    for _, row in df.iterrows():
+                    for index, row in df.iterrows():
                         try:
                             ad_copy = f"""Title: {row['title']}
 Snippet: {row['snippet']}
@@ -105,8 +128,13 @@ Display URL: {row['displayed_link']}"""
                             analysis = analyze_ad_copy(ad_copy)
                             analysis_dict = json.loads(analysis)
                             results.append(analysis_dict)
+                            
+                            # Respect rate limits
+                            if (index + 1) % rate_limit == 0:
+                                st.info(f"Pausing for rate limit. Resuming in {interval} seconds...")
+                                time.sleep(int(interval[:-1]))  # Remove 's' from interval string
                         except Exception as e:
-                            st.error(f"Error processing row: {e}")
+                            st.error(f"Error processing row {index}: {e}")
                             continue
 
                     if results:
