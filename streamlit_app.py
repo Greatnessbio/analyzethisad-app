@@ -52,10 +52,17 @@ def main():
         st.write("Uploaded CSV file:")
         st.write(df)
 
+        # Display column names and let user select which columns to use
+        st.write("Select the columns to use for analysis:")
+        title_col = st.selectbox("Select the column for Ad Title", df.columns)
+        snippet_col = st.selectbox("Select the column for Ad Snippet", df.columns)
+        url_col = st.selectbox("Select the column for Display URL", df.columns)
+        extensions_col = st.selectbox("Select the column for Ad Extensions", df.columns)
+
         if st.button("Analyze Ads"):
             results = []
             for _, row in df.iterrows():
-                ad_copy = f"Title: {row['Title']}\nSnippet: {row['Snippet']}\nDisplay URL: {row['Display URL']}\nExtensions: {row['Extensions']}"
+                ad_copy = f"Title: {row[title_col]}\nSnippet: {row[snippet_col]}\nDisplay URL: {row[url_col]}\nExtensions: {row[extensions_col]}"
                 analysis = analyze_ad_copy(ad_copy)
                 analysis_dict = json.loads(analysis)
                 results.append(analysis_dict)
