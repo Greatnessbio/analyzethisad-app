@@ -5,23 +5,23 @@ import json
 
 # Authentication function
 def authenticate(username, password):
-    return (username == st.secrets["login"]["username"] and 
-            password == st.secrets["login"]["password"])
+    return (username == st.secrets["login_username"] and 
+            password == st.secrets["login_password"])
 
 # OpenRouter API call
 def analyze_ad_copy(ad_copy):
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
-            "Authorization": f"Bearer {st.secrets['openrouter']['api_key']}",
+            "Authorization": f"Bearer {st.secrets['openrouter_api_key']}",
         },
-        data=json.dumps({
+        json={
             "model": "anthropic/claude-3.5-sonnet",
             "messages": [
                 {"role": "system", "content": "You are an expert in analyzing Google Ads copy for ELISA kits. Provide a detailed analysis based on the given criteria."},
                 {"role": "user", "content": f"Analyze the following Google Ads copy for ELISA kits:\n\n{ad_copy}\n\nProvide a comprehensive analysis including title analysis, snippet analysis, display URL analysis, ad extensions analysis, keyword relevance and density, call-to-action analysis, and overall ad strength evaluation. Format your response as a JSON object with keys for each analysis component."}
             ]
-        })
+        }
     )
     return response.json()['choices'][0]['message']['content']
 
