@@ -28,7 +28,7 @@ def check_rate_limits():
     stop=stop_after_attempt(3),
     retry=retry_if_exception_type(requests.exceptions.RequestException)
 )
-def call_openrouter_api(prompt):
+def analyze_ad(ad_copy, search_term):
     try:
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -41,7 +41,19 @@ def call_openrouter_api(prompt):
                 "model": "anthropic/claude-3.5-sonnet",
                 "messages": [
                     {"role": "system", "content": "You are an expert in analyzing Google Ads copy. Provide concise, objective analyses based on the given criteria."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": f"""Analyze this Google Ad for {search_term} products:
+
+Title: {ad_copy['title']}
+Snippet: {ad_copy['snippet']}
+Display URL: {ad_copy['displayed_link']}
+
+Provide a comprehensive analysis including:
+1. Title analysis (effectiveness, keywords, suggestions)
+2. Snippet analysis (informativeness, keywords, suggestions)
+3. URL analysis (structure, brand presence, relevance)
+4. Overall ad strength (strengths, weaknesses, effectiveness, suggestions)
+
+Format your response as a JSON object with keys for each analysis component."""}
                 ]
             }
         )
@@ -51,38 +63,7 @@ def call_openrouter_api(prompt):
     except json.JSONDecodeError:
         return {"error": "Failed to parse API response as JSON"}
     except requests.exceptions.RequestException as e:
-        st.error(f"API request failed: {str(e)}")
-        return None
-
-def analyze_title(title, search_term):
-    prompt = f"Analyze this Google Ad title for {search_term} products: '{title}'. Provide a brief analysis of its effectiveness, keywords used, and any suggestions for improvement. Format your response as a JSON object with keys 'analysis', 'keywords', and 'suggestions'."
-    return call_openrouter_api(prompt)
-
-def analyze_snippet(snippet, search_term):
-    prompt = f"Analyze this Google Ad snippet for {search_term} products: '{snippet}'. Evaluate its informativeness, use of keywords, and provide suggestions for improvement. Format your response as a JSON object with keys 'analysis', 'keywords', and 'suggestions'."
-    return call_openrouter_api(prompt)
-
-def analyze_url(url, search_term):
-    prompt = f"Analyze this Google Ad display URL for {search_term} products: '{url}'. Evaluate its structure, brand presence, and relevance. Format your response as a JSON object with keys 'structure', 'brand_presence', and 'relevance'."
-    return call_openrouter_api(prompt)
-
-def overall_analysis(title, snippet, url, search_term):
-    prompt = f"Provide an overall analysis of this Google Ad for {search_term} products:\nTitle: {title}\nSnippet: {snippet}\nURL: {url}\nEvaluate its strengths, weaknesses, and potential effectiveness. Suggest improvements. Format your response as a JSON object with keys 'strengths', 'weaknesses', 'effectiveness', and 'suggestions'."
-    return call_openrouter_api(prompt)
-
-def analyze_ad_copy(ad_copy, search_term):
-    title_analysis = analyze_title(ad_copy['title'], search_term)
-    snippet_analysis = analyze_snippet(ad_copy['snippet'], search_term)
-    url_analysis = analyze_url(ad_copy['displayed_link'], search_term)
-    overall = overall_analysis(ad_copy['title'], ad_copy['snippet'], ad_copy['displayed_link'], search_term)
-    
-    return {
-        'original_ad': ad_copy,
-        'title_analysis': title_analysis,
-        'snippet_analysis': snippet_analysis,
-        'url_analysis': url_analysis,
-        'overall_analysis': overall
-    }
+        return {"error": f"API request failed: {str(e)}"}
 
 def validate_columns(df):
     expected_columns = ['title', 'snippet', 'displayed_link']
@@ -171,8 +152,11 @@ def main():
                         'snippet': row['snippet'],
                         'displayed_link': row['displayed_link']
                     }
-                    analysis = analyze_ad_copy(ad_copy, search_term)
-                    results.append(analysis)
+                    analysis = analyze_ad(ad_copy, search_term)
+                    
+                    # Combine original ad data with analysis
+                    result = {**ad_copy, **analysis}
+                    results.append(result)
 
                     # Update progress
                     st.session_state.progress += 1
@@ -188,8 +172,17 @@ def main():
                     # Flatten and normalize results
                     flattened_results = [flatten_dict(result) for result in results]
                     
+                    # Get all unique keys
+                    all_keys = set().union(*flattened_results)
+                    
+                    # Normalize the dictionaries
+                    normalized_results = []
+                    for result in flattened_results:
+                        normalized_result = {key: result.get(key, 'N/A') for key in all_keys}
+                        normalized_results.append(normalized_result)
+                    
                     # Create DataFrame
-                    results_df = pd.DataFrame(flattened_results)
+                    results_df = pd.DataFrame(normalized_results)
                     
                     st.session_state.results = results_df
                     st.success(f"Analysis complete! Successfully analyzed {len(results)} out of {len(df)} ads.")
