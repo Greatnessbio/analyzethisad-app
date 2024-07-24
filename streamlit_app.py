@@ -28,7 +28,7 @@ def check_rate_limits():
     stop=stop_after_attempt(3),
     retry=retry_if_exception_type(requests.exceptions.RequestException)
 )
-def analyze_ad(ad_copy, search_term):
+def call_openrouter_api(prompt):
     try:
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -41,19 +41,7 @@ def analyze_ad(ad_copy, search_term):
                 "model": "anthropic/claude-3.5-sonnet",
                 "messages": [
                     {"role": "system", "content": "You are an expert in analyzing Google Ads copy. Provide concise, objective analyses based on the given criteria."},
-                    {"role": "user", "content": f"""Analyze this Google Ad for {search_term} products:
-
-Title: {ad_copy['title']}
-Snippet: {ad_copy['snippet']}
-Display URL: {ad_copy['displayed_link']}
-
-Provide a comprehensive analysis including:
-1. Title analysis (effectiveness, keywords, suggestions)
-2. Snippet analysis (informativeness, keywords, suggestions)
-3. URL analysis (structure, brand presence, relevance)
-4. Overall ad strength (strengths, weaknesses, effectiveness, suggestions)
-
-Format your response as a JSON object with keys for each analysis component."""}
+                    {"role": "user", "content": prompt}
                 ]
             }
         )
@@ -64,6 +52,58 @@ Format your response as a JSON object with keys for each analysis component."""}
         return {"error": "Failed to parse API response as JSON"}
     except requests.exceptions.RequestException as e:
         return {"error": f"API request failed: {str(e)}"}
+
+def analyze_title(title, search_term):
+    prompt = f"""Analyze this Google Ad title for {search_term} products: '{title}'
+    Provide a JSON response with the following keys:
+    1. effectiveness (score 1-10)
+    2. keywords (list of main keywords)
+    3. comments (brief analysis)
+    4. suggestions (list of improvement ideas)"""
+    return call_openrouter_api(prompt)
+
+def analyze_snippet(snippet, search_term):
+    prompt = f"""Analyze this Google Ad snippet for {search_term} products: '{snippet}'
+    Provide a JSON response with the following keys:
+    1. informativeness (score 1-10)
+    2. keywords (list of main keywords)
+    3. comments (brief analysis)
+    4. suggestions (list of improvement ideas)"""
+    return call_openrouter_api(prompt)
+
+def analyze_url(url, search_term):
+    prompt = f"""Analyze this Google Ad display URL for {search_term} products: '{url}'
+    Provide a JSON response with the following keys:
+    1. structure (score 1-10)
+    2. brand_presence (strong/moderate/weak)
+    3. relevance (score 1-10)
+    4. comments (brief analysis)"""
+    return call_openrouter_api(prompt)
+
+def analyze_overall_strength(title, snippet, url, search_term):
+    prompt = f"""Analyze the overall strength of this Google Ad for {search_term} products:
+    Title: {title}
+    Snippet: {snippet}
+    URL: {url}
+    Provide a JSON response with the following keys:
+    1. effectiveness (score 1-10)
+    2. strengths (list of strong points)
+    3. weaknesses (list of weak points)
+    4. suggestions (list of improvement ideas)"""
+    return call_openrouter_api(prompt)
+
+def analyze_ad(ad_copy, search_term):
+    title_analysis = analyze_title(ad_copy['title'], search_term)
+    snippet_analysis = analyze_snippet(ad_copy['snippet'], search_term)
+    url_analysis = analyze_url(ad_copy['displayed_link'], search_term)
+    overall_analysis = analyze_overall_strength(ad_copy['title'], ad_copy['snippet'], ad_copy['displayed_link'], search_term)
+    
+    return {
+        'title_analysis': title_analysis,
+        'snippet_analysis': snippet_analysis,
+        'url_analysis': url_analysis,
+        'overall_ad_strength': overall_analysis
+    }
 
 def validate_columns(df):
     expected_columns = ['title', 'snippet', 'displayed_link']
