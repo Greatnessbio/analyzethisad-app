@@ -3,7 +3,9 @@ import pandas as pd
 import requests
 import json
 import time
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+
+# Set page config
+st.set_page_config(page_title="Ad Analysis System", page_icon="📊", layout="wide")
 
 # Authentication function
 def authenticate(username, password):
@@ -11,37 +13,52 @@ def authenticate(username, password):
             password == st.secrets["login_password"])
 
 # Function to check API rate limits
+@st.cache_data(ttl=3600)
 def check_rate_limits():
-    response = requests.get(
-        "https://openrouter.ai/api/v1/auth/key",
-        headers={"Authorization": f"Bearer {st.secrets['openrouter_api_key']}"},
-    )
-    if response.status_code == 200:
-        data = response.json()['data']
-        return data['rate_limit']['requests'], data['rate_limit']['interval']
-    else:
-        st.error("Failed to check rate limits. Please try again later.")
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/auth/key",
+            headers={"Authorization": f"Bearer {st.secrets['openrouter_api_key']}"},
+        )
+        if response.status_code == 200:
+            data = response.json()['data']
+            return data['rate_limit']['requests'], data['rate_limit']['interval']
+        else:
+            st.error("Failed to check rate limits. Please try again later.")
+            return None, None
+    except Exception as e:
+        st.error(f"Error checking rate limits: {str(e)}")
         return None, None
 
-@retry(
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    stop=stop_after_attempt(3),
-    retry=retry_if_exception_type(requests.exceptions.RequestException)
-)
-def call_openrouter_api(prompt):
+# Function to analyze ad copy
+def analyze_ad_copy(ad_copy, search_term):
     try:
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {st.secrets['openrouter_api_key']}",
-                "HTTP-Referer": "https://your-app-url.com",  # Replace with your actual app URL
-                "X-Title": "Ad Copy Analysis App",  # Replace with your app's name
+                "HTTP-Referer": "https://your-app-url.com",
+                "X-Title": "Ad Copy Analysis App",
+                "Content-Type": "application/json"
             },
             json={
                 "model": "anthropic/claude-3.5-sonnet",
                 "messages": [
-                    {"role": "system", "content": "You are an expert in analyzing Google Ads copy. Provide concise, objective analyses based on the given criteria."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": f"You are an expert in analyzing Google Ads copy for {search_term} products. Provide a concise, objective analysis based on the given criteria."},
+                    {"role": "user", "content": f"""Analyze this Google Ad for {search_term} products:
+
+Title: {ad_copy['title']}
+Snippet: {ad_copy['snippet']}
+Display URL: {ad_copy['displayed_link']}
+
+Provide a brief analysis including:
+1. Title effectiveness (score 1-10)
+2. Snippet informativeness (score 1-10)
+3. Overall ad strength (score 1-10)
+4. Key strengths (comma-separated list)
+5. Improvement suggestions (comma-separated list)
+
+Format your response as a JSON object with these keys."""}
                 ]
             }
         )
@@ -53,74 +70,32 @@ def call_openrouter_api(prompt):
     except requests.exceptions.RequestException as e:
         return {"error": f"API request failed: {str(e)}"}
 
-def analyze_title(title, search_term):
-    prompt = f"""Analyze this Google Ad title for {search_term} products: '{title}'
-    Provide a JSON response with the following keys:
-    1. effectiveness (score 1-10)
-    2. keywords (list of main keywords)
-    3. comments (brief analysis)
-    4. suggestions (list of improvement ideas)"""
-    return call_openrouter_api(prompt)
-
-def analyze_snippet(snippet, search_term):
-    prompt = f"""Analyze this Google Ad snippet for {search_term} products: '{snippet}'
-    Provide a JSON response with the following keys:
-    1. informativeness (score 1-10)
-    2. keywords (list of main keywords)
-    3. comments (brief analysis)
-    4. suggestions (list of improvement ideas)"""
-    return call_openrouter_api(prompt)
-
-def analyze_url(url, search_term):
-    prompt = f"""Analyze this Google Ad display URL for {search_term} products: '{url}'
-    Provide a JSON response with the following keys:
-    1. structure (score 1-10)
-    2. brand_presence (strong/moderate/weak)
-    3. relevance (score 1-10)
-    4. comments (brief analysis)"""
-    return call_openrouter_api(prompt)
-
-def analyze_overall_strength(title, snippet, url, search_term):
-    prompt = f"""Analyze the overall strength of this Google Ad for {search_term} products:
-    Title: {title}
-    Snippet: {snippet}
-    URL: {url}
-    Provide a JSON response with the following keys:
-    1. effectiveness (score 1-10)
-    2. strengths (list of strong points)
-    3. weaknesses (list of weak points)
-    4. suggestions (list of improvement ideas)"""
-    return call_openrouter_api(prompt)
-
-def analyze_ad(ad_copy, search_term):
-    title_analysis = analyze_title(ad_copy['title'], search_term)
-    snippet_analysis = analyze_snippet(ad_copy['snippet'], search_term)
-    url_analysis = analyze_url(ad_copy['displayed_link'], search_term)
-    overall_analysis = analyze_overall_strength(ad_copy['title'], ad_copy['snippet'], ad_copy['displayed_link'], search_term)
+# Function to process the dataframe
+@st.cache_data
+def process_dataframe(df, search_term, progress_bar, status_text):
+    results = []
+    total_rows = len(df)
     
-    return {
-        'title_analysis': title_analysis,
-        'snippet_analysis': snippet_analysis,
-        'url_analysis': url_analysis,
-        'overall_ad_strength': overall_analysis
-    }
-
-def validate_columns(df):
-    expected_columns = ['title', 'snippet', 'displayed_link']
-    missing_columns = [col for col in expected_columns if col not in df.columns]
-    return missing_columns
-
-def flatten_dict(d, parent_key='', sep='_'):
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
-        elif isinstance(v, list):
-            items.append((new_key, ', '.join(map(str, v))))
-        else:
-            items.append((new_key, str(v)))
-    return dict(items)
+    for index, row in df.iterrows():
+        ad_copy = {
+            'title': row['title'],
+            'snippet': row['snippet'],
+            'displayed_link': row['displayed_link']
+        }
+        analysis = analyze_ad_copy(ad_copy, search_term)
+        
+        result = {**ad_copy, **analysis}
+        results.append(result)
+        
+        # Update progress
+        progress = (index + 1) / total_rows
+        progress_bar.progress(progress)
+        status_text.text(f"Analyzed {index + 1} out of {total_rows} ads")
+        
+        # Respect rate limits
+        time.sleep(1)  # Add a small delay between requests
+    
+    return pd.DataFrame(results)
 
 # Main application
 def main():
@@ -129,12 +104,10 @@ def main():
     # Initialize session state
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
+    if 'df' not in st.session_state:
+        st.session_state.df = None
     if 'results' not in st.session_state:
         st.session_state.results = None
-    if 'progress' not in st.session_state:
-        st.session_state.progress = 0
-    if 'total_ads' not in st.session_state:
-        st.session_state.total_ads = 0
 
     # Login form
     if not st.session_state.logged_in:
@@ -157,110 +130,51 @@ def main():
     # Add input for search term
     search_term = st.text_input("Enter the search term you used to generate this data:", "")
     
-    if uploaded_file is not None and search_term:
+    if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
+            st.session_state.df = df
             st.write("Uploaded CSV file:")
             st.write(df)
 
-            # Validate columns
-            missing_columns = validate_columns(df)
-            if missing_columns:
-                st.error(f"The following required columns are missing from your CSV: {', '.join(missing_columns)}")
-                st.info("Please ensure your CSV file has the following columns: title, snippet, displayed_link")
-                return
+            if search_term:
+                if st.button("Analyze Ads"):
+                    # Check rate limits
+                    rate_limit, interval = check_rate_limits()
+                    if rate_limit is None:
+                        return
 
-            st.info(f"Analysis will be performed for the search term: {search_term}")
+                    with st.spinner("Analyzing ads... This may take a few minutes."):
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
 
-            if st.button("Analyze Ads"):
-                # Check rate limits
-                rate_limit, interval = check_rate_limits()
-                if rate_limit is None:
-                    return
+                        results_df = process_dataframe(df, search_term, progress_bar, status_text)
+                        st.session_state.results = results_df
 
-                # Reset progress
-                st.session_state.progress = 0
-                st.session_state.total_ads = len(df)
+                    st.success(f"Analysis complete! Successfully analyzed {len(results_df)} ads.")
 
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                # Display results if they exist in session state
+                if st.session_state.results is not None:
+                    st.subheader("Analysis Results:")
+                    st.write(st.session_state.results)
 
-                results = []
-                for index, row in df.iterrows():
-                    ad_copy = {
-                        'title': row['title'],
-                        'snippet': row['snippet'],
-                        'displayed_link': row['displayed_link']
-                    }
-                    analysis = analyze_ad(ad_copy, search_term)
-                    
-                    # Combine original ad data with analysis
-                    result = {**ad_copy, **analysis}
-                    results.append(result)
-
-                    # Update progress
-                    st.session_state.progress += 1
-                    progress = st.session_state.progress / st.session_state.total_ads
-                    progress_bar.progress(progress)
-                    status_text.text(f"Analyzed {st.session_state.progress} out of {st.session_state.total_ads} ads")
-
-                    # Respect rate limits
-                    if (index + 1) % rate_limit == 0 and index < len(df) - 1:
-                        time.sleep(int(interval[:-1]))  # Remove 's' from interval string
-
-                if results:
-                    # Flatten and normalize results
-                    flattened_results = [flatten_dict(result) for result in results]
-                    
-                    # Get all unique keys
-                    all_keys = set().union(*flattened_results)
-                    
-                    # Normalize the dictionaries
-                    normalized_results = []
-                    for result in flattened_results:
-                        normalized_result = {key: result.get(key, 'N/A') for key in all_keys}
-                        normalized_results.append(normalized_result)
-                    
-                    # Create DataFrame
-                    results_df = pd.DataFrame(normalized_results)
-                    
-                    st.session_state.results = results_df
-                    st.success(f"Analysis complete! Successfully analyzed {len(results)} out of {len(df)} ads.")
-                else:
-                    st.warning("No results were generated. Please check your CSV file and try again.")
-
-                # Clear progress bar and status text
-                progress_bar.empty()
-                status_text.empty()
-
-            # Display results if they exist in session state
-            if st.session_state.results is not None:
-                st.subheader("Analysis Results:")
-                st.write(st.session_state.results)
-
-                # Option to download results as CSV
-                csv = st.session_state.results.to_csv(index=False)
-                st.download_button(
-                    label="Download results as CSV",
-                    data=csv,
-                    file_name="ad_analysis_results.csv",
-                    mime="text/csv",
-                )
-
+                    # Option to download results as CSV
+                    csv = st.session_state.results.to_csv(index=False)
+                    st.download_button(
+                        label="Download results as CSV",
+                        data=csv,
+                        file_name="ad_analysis_results.csv",
+                        mime="text/csv",
+                    )
+            else:
+                st.warning("Please enter the search term you used to generate this data.")
         except Exception as e:
             st.error(f"An error occurred while processing the file: {str(e)}")
 
-    elif uploaded_file is not None and not search_term:
-        st.warning("Please enter the search term you used to generate this data.")
-    elif search_term and not uploaded_file:
-        st.warning("Please upload a CSV file to analyze.")
-
     # Logout button
     if st.sidebar.button("Logout"):
-        st.session_state.logged_in = False
-        st.session_state.results = None
-        st.session_state.progress = 0
-        st.session_state.total_ads = 0
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.experimental_rerun()
 
 if __name__ == "__main__":
