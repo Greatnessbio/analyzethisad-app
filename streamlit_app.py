@@ -49,6 +49,11 @@ Format your response as a JSON object with keys for each analysis component."""}
     )
     return response.json()['choices'][0]['message']['content']
 
+def validate_columns(df):
+    expected_columns = ['title', 'snippet', 'displayed_link', 'rich_snippet.top.extensions']
+    missing_columns = [col for col in expected_columns if col not in df.columns]
+    return missing_columns
+
 # Main application
 def main():
     st.title("Google Ads ELISA Kit Analysis System")
@@ -73,36 +78,51 @@ def main():
     uploaded_file = st.file_uploader("Upload your CSV file", type="csv")
     
     if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.write("Uploaded CSV file:")
-        st.write(df)
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.write("Uploaded CSV file:")
+            st.write(df)
 
-        # Automatically use the correct columns based on expected headers
-        title_col = 'title'
-        snippet_col = 'snippet'
-        url_col = 'displayed_link'
-        extensions_col = 'rich_snippet.top.extensions'
+            # Validate columns
+            missing_columns = validate_columns(df)
+            if missing_columns:
+                st.error(f"The following required columns are missing from your CSV: {', '.join(missing_columns)}")
+                st.info("Please ensure your CSV file has the following columns: title, snippet, displayed_link, rich_snippet.top.extensions")
+                return
 
-        if st.button("Analyze Ads"):
-            results = []
-            for _, row in df.iterrows():
-                ad_copy = f"Title: {row[title_col]}\nSnippet: {row[snippet_col]}\nDisplay URL: {row[url_col]}\nExtensions: {row[extensions_col]}"
-                analysis = analyze_ad_copy(ad_copy)
-                analysis_dict = json.loads(analysis)
-                results.append(analysis_dict)
+            if st.button("Analyze Ads"):
+                results = []
+                for _, row in df.iterrows():
+                    try:
+                        ad_copy = f"""Title: {row['title']}
+Snippet: {row['snippet']}
+Display URL: {row['displayed_link']}
+Extensions: {row['rich_snippet.top.extensions']}"""
+                        analysis = analyze_ad_copy(ad_copy)
+                        analysis_dict = json.loads(analysis)
+                        results.append(analysis_dict)
+                    except KeyError as e:
+                        st.error(f"Error processing row: {e}")
+                        continue
 
-            results_df = pd.DataFrame(results)
-            st.write("Analysis Results:")
-            st.write(results_df)
+                if results:
+                    results_df = pd.DataFrame(results)
+                    st.write("Analysis Results:")
+                    st.write(results_df)
 
-            # Option to download results as CSV
-            csv = results_df.to_csv(index=False)
-            st.download_button(
-                label="Download results as CSV",
-                data=csv,
-                file_name="ad_analysis_results.csv",
-                mime="text/csv",
-            )
+                    # Option to download results as CSV
+                    csv = results_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download results as CSV",
+                        data=csv,
+                        file_name="ad_analysis_results.csv",
+                        mime="text/csv",
+                    )
+                else:
+                    st.warning("No results were generated. Please check your CSV file and try again.")
+
+        except Exception as e:
+            st.error(f"An error occurred while processing the file: {str(e)}")
 
     # Logout button
     if st.button("Logout"):
