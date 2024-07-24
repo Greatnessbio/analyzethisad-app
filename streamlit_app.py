@@ -23,7 +23,6 @@ def check_rate_limits():
         st.error("Failed to check rate limits. Please try again later.")
         return None, None
 
-# OpenRouter API call with retry logic and improved error handling
 @retry(
     wait=wait_exponential(multiplier=1, min=4, max=10),
     stop=stop_after_attempt(3),
@@ -64,7 +63,7 @@ def analyze_ad_copy(ad_copy, search_term):
     14. Snippet improvement suggestions
     15. Personalized ad copy recommendations
 
-    Format your response as a JSON object with keys for each analysis component."""}
+    Format your response as a JSON object with keys for each analysis component. Ensure that all values are strings or lists of strings."""}
                 ]
             }
         )
@@ -73,7 +72,14 @@ def analyze_ad_copy(ad_copy, search_term):
         
         # Try to parse the content as JSON
         try:
-            return json.loads(content)
+            parsed_content = json.loads(content)
+            # Ensure all values are strings or lists of strings
+            for key, value in parsed_content.items():
+                if isinstance(value, list):
+                    parsed_content[key] = [str(item) for item in value]
+                elif not isinstance(value, str):
+                    parsed_content[key] = str(value)
+            return parsed_content
         except json.JSONDecodeError:
             # If JSON parsing fails, return a structured dictionary with the raw content
             return {
@@ -89,6 +95,16 @@ def validate_columns(df):
     expected_columns = ['title', 'snippet', 'displayed_link']
     missing_columns = [col for col in expected_columns if col not in df.columns]
     return missing_columns
+
+def flatten_dict(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 # Main application
 def main():
@@ -166,28 +182,44 @@ Display URL: {row['displayed_link']}"""
                             time.sleep(int(interval[:-1]))  # Remove 's' from interval string
 
                     if results:
-                        # Convert results to DataFrame, handling potential inconsistencies
-                        results_df = pd.DataFrame(results)
-                        # Fill NaN values with empty strings to avoid issues when saving to CSV
-                        results_df = results_df.fillna('')
+                        # Flatten and normalize results
+                        flattened_results = [flatten_dict(result) for result in results]
+                        
+                        # Get all unique keys
+                        all_keys = set().union(*flattened_results)
+                        
+                        # Normalize the dictionaries
+                        normalized_results = []
+                        for result in flattened_results:
+                            normalized_result = {key: result.get(key, '') for key in all_keys}
+                            normalized_results.append(normalized_result)
+                        
+                        # Create DataFrame
+                        results_df = pd.DataFrame(normalized_results)
+                        
+                        # Handle list columns
+                        for column in results_df.columns:
+                            if results_df[column].apply(lambda x: isinstance(x, list)).any():
+                                results_df[column] = results_df[column].apply(lambda x: ', '.join(x) if isinstance(x, list) else x)
+                        
                         st.session_state.results = results_df
                         st.success(f"Analysis complete! Successfully analyzed {len(results)} out of {len(df)} ads.")
                     else:
                         st.warning("No results were generated. Please check your CSV file and try again.")
 
-            # Display results if they exist in session state
-            if st.session_state.results is not None:
-                st.subheader("Analysis Results:")
-                st.write(st.session_state.results)
+                # Display results if they exist in session state
+                if st.session_state.results is not None:
+                    st.subheader("Analysis Results:")
+                    st.write(st.session_state.results)
 
-                # Option to download results as CSV
-                csv = st.session_state.results.to_csv(index=False)
-                st.download_button(
-                    label="Download results as CSV",
-                    data=csv,
-                    file_name="ad_analysis_results.csv",
-                    mime="text/csv",
-                )
+                    # Option to download results as CSV
+                    csv = st.session_state.results.to_csv(index=False)
+                    st.download_button(
+                        label="Download results as CSV",
+                        data=csv,
+                        file_name="ad_analysis_results.csv",
+                        mime="text/csv",
+                    )
 
         except Exception as e:
             st.error(f"An error occurred while processing the file: {str(e)}")
