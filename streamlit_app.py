@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import json
 import time
-from tenacity import retry, wait_exponential, stop_after_attempt
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 # Authentication function
 def authenticate(username, password):
@@ -23,48 +23,64 @@ def check_rate_limits():
         st.error("Failed to check rate limits. Please try again later.")
         return None, None
 
-# OpenRouter API call with retry logic
-@retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(3))
+# OpenRouter API call with retry logic and improved error handling
+@retry(
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.exceptions.RequestException)
+)
 def analyze_ad_copy(ad_copy):
-    response = requests.post(
-        url="https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {st.secrets['openrouter_api_key']}",
-            "HTTP-Referer": "https://your-app-url.com",  # Replace with your actual app URL
-            "X-Title": "ELISA Kit Analysis App",  # Replace with your app's name
-        },
-        json={
-            "model": "anthropic/claude-3.5-sonnet",
-            "messages": [
-                {"role": "system", "content": "You are an expert in analyzing Google Ads copy for ELISA kits. Provide a detailed analysis based on the given criteria."},
-                {"role": "user", "content": f"""Analyze the following Google Ads copy for ELISA kits:
+    try:
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {st.secrets['openrouter_api_key']}",
+                "HTTP-Referer": "https://your-app-url.com",  # Replace with your actual app URL
+                "X-Title": "ELISA Kit Analysis App",  # Replace with your app's name
+            },
+            json={
+                "model": "anthropic/claude-3.5-sonnet",
+                "messages": [
+                    {"role": "system", "content": "You are an expert in analyzing Google Ads copy for ELISA kits. Provide a detailed analysis based on the given criteria."},
+                    {"role": "user", "content": f"""Analyze the following Google Ads copy for ELISA kits:
 
-{ad_copy}
+    {ad_copy}
 
-Provide a comprehensive analysis including title analysis, snippet analysis, display URL analysis, keyword relevance and density, call-to-action analysis, and overall ad strength evaluation. Your analysis should include:
+    Provide a comprehensive analysis including title analysis, snippet analysis, display URL analysis, keyword relevance and density, call-to-action analysis, and overall ad strength evaluation. Your analysis should include:
 
-1. Keyword extraction and analysis
-2. Structure, length, and brand/product mentions
-3. Sentiment analysis and emotional triggers
-4. Power words and USPs identification
-5. Value propositions
-6. Entity recognition (products, brands, features)
-7. Readability scoring
-8. URL structure analysis
-9. Keyword density and long-tail keywords
-10. Semantic relevance to ELISA kits
-11. CTA strength and placement
-12. Overall ad strength and potential Quality Score
-13. 2-3 alternative headlines
-14. Snippet improvement suggestions
-15. Personalized ad copy recommendations
+    1. Keyword extraction and analysis
+    2. Structure, length, and brand/product mentions
+    3. Sentiment analysis and emotional triggers
+    4. Power words and USPs identification
+    5. Value propositions
+    6. Entity recognition (products, brands, features)
+    7. Readability scoring
+    8. URL structure analysis
+    9. Keyword density and long-tail keywords
+    10. Semantic relevance to ELISA kits
+    11. CTA strength and placement
+    12. Overall ad strength and potential Quality Score
+    13. 2-3 alternative headlines
+    14. Snippet improvement suggestions
+    15. Personalized ad copy recommendations
 
-Format your response as a JSON object with keys for each analysis component."""}
-            ]
-        }
-    )
-    response.raise_for_status()
-    return response.json()['choices'][0]['message']['content']
+    Format your response as a JSON object with keys for each analysis component."""}
+                ]
+            }
+        )
+        response.raise_for_status()
+        content = response.json()['choices'][0]['message']['content']
+        
+        # Try to parse the content as JSON
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If parsing fails, return the raw content
+            return {"error": "Failed to parse API response as JSON", "raw_content": content}
+    
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {str(e)}")
+        return {"error": f"API request failed: {str(e)}"}
 
 def validate_columns(df):
     expected_columns = ['title', 'snippet', 'displayed_link']
@@ -126,15 +142,22 @@ def main():
 Snippet: {row['snippet']}
 Display URL: {row['displayed_link']}"""
                             analysis = analyze_ad_copy(ad_copy)
-                            analysis_dict = json.loads(analysis)
-                            results.append(analysis_dict)
+                            
+                            # Check if the analysis contains an error
+                            if "error" in analysis:
+                                st.error(f"Error processing row {index}: {analysis['error']}")
+                                if "raw_content" in analysis:
+                                    st.text(f"Raw API response: {analysis['raw_content']}")
+                                continue
+                            
+                            results.append(analysis)
                             
                             # Respect rate limits
                             if (index + 1) % rate_limit == 0:
                                 st.info(f"Pausing for rate limit. Resuming in {interval} seconds...")
                                 time.sleep(int(interval[:-1]))  # Remove 's' from interval string
                         except Exception as e:
-                            st.error(f"Error processing row {index}: {e}")
+                            st.error(f"Error processing row {index}: {str(e)}")
                             continue
 
                     if results:
