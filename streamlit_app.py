@@ -72,7 +72,7 @@ Format your response as a JSON object with these keys."""}
 
 # Function to process the dataframe
 @st.cache_data
-def process_dataframe(df, search_term, progress_bar, status_text):
+def process_dataframe(df, search_term):
     results = []
     total_rows = len(df)
     
@@ -86,11 +86,6 @@ def process_dataframe(df, search_term, progress_bar, status_text):
         
         result = {**ad_copy, **analysis}
         results.append(result)
-        
-        # Update progress
-        progress = (index + 1) / total_rows
-        progress_bar.progress(progress)
-        status_text.text(f"Analyzed {index + 1} out of {total_rows} ads")
         
         # Respect rate limits
         time.sleep(1)  # Add a small delay between requests
@@ -148,7 +143,16 @@ def main():
                         progress_bar = st.progress(0)
                         status_text = st.empty()
 
-                        results_df = process_dataframe(df, search_term, progress_bar, status_text)
+                        results_df = process_dataframe(df, search_term)
+                        
+                        # Update progress bar and status text
+                        total_rows = len(results_df)
+                        for i in range(total_rows):
+                            progress = (i + 1) / total_rows
+                            progress_bar.progress(progress)
+                            status_text.text(f"Analyzed {i + 1} out of {total_rows} ads")
+                            time.sleep(0.1)  # Small delay for visual feedback
+
                         st.session_state.results = results_df
 
                     st.success(f"Analysis complete! Successfully analyzed {len(results_df)} ads.")
