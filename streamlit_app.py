@@ -4,6 +4,7 @@ import requests
 import json
 import time
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from collections import Counter
 
 # Authentication function
 def authenticate(username, password):
@@ -23,16 +24,23 @@ def check_rate_limits():
         st.error("Failed to check rate limits. Please try again later.")
         return None, None
 
-# Function to extract search term from CSV
+# Updated function to extract search term from CSV
 def extract_search_term(df):
-    # Assuming the search term is mentioned in the title or snippet columns
-    search_terms = df['title'].str.cat(df['snippet'], sep=' ').lower().split()
+    # Combine title and snippet columns
+    combined_text = df['title'].fillna('') + ' ' + df['snippet'].fillna('')
+    
+    # Convert to lowercase and split into words
+    all_words = ' '.join(combined_text).lower().split()
+    
     # Count occurrences of words (excluding common words)
-    word_counts = pd.Series(search_terms).value_counts()
     common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with'}
-    word_counts = word_counts[~word_counts.index.isin(common_words)]
+    word_counts = Counter(word for word in all_words if word not in common_words)
+    
     # Return the most frequent word as the likely search term
-    return word_counts.index[0] if not word_counts.empty else "product"
+    if word_counts:
+        return max(word_counts, key=word_counts.get)
+    else:
+        return "product"  # Default if no words found
 
 # OpenRouter API call with retry logic and improved error handling
 @retry(
