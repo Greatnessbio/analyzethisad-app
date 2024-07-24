@@ -19,7 +19,31 @@ def analyze_ad_copy(ad_copy):
             "model": "anthropic/claude-3.5-sonnet",
             "messages": [
                 {"role": "system", "content": "You are an expert in analyzing Google Ads copy for ELISA kits. Provide a detailed analysis based on the given criteria."},
-                {"role": "user", "content": f"Analyze the following Google Ads copy for ELISA kits:\n\n{ad_copy}\n\nProvide a comprehensive analysis including title analysis, snippet analysis, display URL analysis, ad extensions analysis, keyword relevance and density, call-to-action analysis, and overall ad strength evaluation. Format your response as a JSON object with keys for each analysis component."}
+                {"role": "user", "content": f"""Analyze the following Google Ads copy for ELISA kits:
+
+{ad_copy}
+
+Provide a comprehensive analysis including title analysis, snippet analysis, display URL analysis, ad extensions analysis, keyword relevance and density, call-to-action analysis, and overall ad strength evaluation. Your analysis should include:
+
+1. Keyword extraction and analysis
+2. Structure, length, and brand/product mentions
+3. Sentiment analysis and emotional triggers
+4. Power words and USPs identification
+5. Value propositions
+6. Entity recognition (products, brands, features)
+7. Readability scoring
+8. URL structure analysis
+9. Ad extensions evaluation
+10. Keyword density and long-tail keywords
+11. Semantic relevance to ELISA kits
+12. CTA strength and placement
+13. Overall ad strength and potential Quality Score
+14. 2-3 alternative headlines
+15. Snippet improvement suggestions
+16. Ad extension recommendations
+17. Personalized ad copy recommendations
+
+Format your response as a JSON object with keys for each analysis component."""}
             ]
         }
     )
@@ -47,17 +71,17 @@ def main():
 
     # Main application (only accessible after login)
     uploaded_file = st.file_uploader("Upload your CSV file", type="csv")
+    
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         st.write("Uploaded CSV file:")
         st.write(df)
 
-        # Display column names and let user select which columns to use
-        st.write("Select the columns to use for analysis:")
-        title_col = st.selectbox("Select the column for Ad Title", df.columns)
-        snippet_col = st.selectbox("Select the column for Ad Snippet", df.columns)
-        url_col = st.selectbox("Select the column for Display URL", df.columns)
-        extensions_col = st.selectbox("Select the column for Ad Extensions", df.columns)
+        # Automatically use the correct columns based on expected headers
+        title_col = 'title'
+        snippet_col = 'snippet'
+        url_col = 'displayed_link'
+        extensions_col = 'rich_snippet.top.extensions'
 
         if st.button("Analyze Ads"):
             results = []
